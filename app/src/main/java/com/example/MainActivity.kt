@@ -1346,6 +1346,7 @@ fun NirvanaThreadsScreen(
 
         val conversationsUnreadCount = remember(threads) { threads.sumOf { it.unreadCount } }
         val spamUnreadCount = remember(spamThreads) { spamThreads.sumOf { it.unreadCount } }
+        val draftsMap by viewModel.draftsMap.collectAsState()
 
         // Folder Tabs (Normal Chats vs. Anti-Spam folder)
         TabRow(
@@ -1477,6 +1478,7 @@ fun NirvanaThreadsScreen(
                             onDelete = { viewModel.deleteThread(thread.threadId) },
                             isSelectionMode = isSelectionMode.value,
                             isSelected = selectedThreadIds.contains(thread.threadId),
+                            draftText = draftsMap[thread.threadId],
                             onHide = {
                                 val currentPin = viewModel.securePin.value
                                 if (currentPin.isEmpty()) {
@@ -2003,12 +2005,14 @@ fun NirvanaThreadRowItem(
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
     onHide: (() -> Unit)? = null,
-    onLongClick: (() -> Unit)? = null
+    onLongClick: (() -> Unit)? = null,
+    draftText: String? = null
 ) {
     var expandedMenu by remember { mutableStateOf(false) }
 
     val initialLetter = (thread.senderName ?: thread.address).trim().take(1).uppercase()
     val isUnread = thread.unreadCount > 0
+    val hasDraft = !draftText.isNullOrBlank()
 
     Box(
         modifier = Modifier
@@ -2127,16 +2131,28 @@ fun NirvanaThreadRowItem(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val displaySnippet = if (hasDraft) {
+                        if (language == "fa") "پیش‌نویس: $draftText" else "Draft: $draftText"
+                    } else {
+                        thread.body
+                    }
+                    val snippetColor = if (hasDraft) {
+                        MaterialTheme.colorScheme.error
+                    } else if (isUnread) {
+                        MaterialTheme.colorScheme.onBackground
+                    } else {
+                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                    }
+
                     Text(
-                        text = thread.body,
+                        text = displaySnippet,
                         style = NirvanaFont.getTextStyle(
                             fontStyle, 
                             fontSizeScale, 
                             13, 
-                            if (isUnread) FontWeight.SemiBold else FontWeight.Normal
+                            if (hasDraft || isUnread) FontWeight.SemiBold else FontWeight.Normal
                         ),
-                        color = if (isUnread) MaterialTheme.colorScheme.onBackground
-                                else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        color = snippetColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
@@ -2259,12 +2275,8 @@ fun NirvanaThreadDetailsScreen(
     fontStyle: String,
     fontSizeScale: Float
 ) {
-    BackHandler(enabled = true) {
-        onBack()
-    }
     val messages by viewModel.activeMessages.collectAsState()
     val pendingMsg by viewModel.pendingDelayedMessage.collectAsState()
-    var messageBody by remember { mutableStateOf("") }
     val lazyListState = rememberLazyListState()
     val context = LocalContext.current
 
@@ -2275,6 +2287,24 @@ fun NirvanaThreadDetailsScreen(
     val thread = remember(allThreads, allSpamThreads, allHiddenThreads, initialThread) {
         val found = (allThreads + allSpamThreads + allHiddenThreads).find { it.threadId == initialThread.threadId || it.address == initialThread.address }
         found ?: initialThread
+    }
+
+    val savedDraft = remember(thread.threadId) { viewModel.getDraft(thread.threadId) }
+    var messageBody by remember(thread.threadId) { mutableStateOf(savedDraft) }
+
+    LaunchedEffect(thread.threadId, messageBody) {
+        viewModel.saveDraft(thread.threadId, messageBody)
+    }
+
+    DisposableEffect(thread.threadId) {
+        onDispose {
+            viewModel.saveDraft(thread.threadId, messageBody)
+        }
+    }
+
+    BackHandler(enabled = true) {
+        viewModel.saveDraft(thread.threadId, messageBody)
+        onBack()
     }
 
     val timelineItems = remember(messages, language) {
@@ -2582,7 +2612,10 @@ fun NirvanaThreadDetailsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = onBack,
+                    onClick = {
+                        viewModel.saveDraft(thread.threadId, messageBody)
+                        onBack()
+                    },
                     modifier = Modifier.testTag("conversation_back_btn")
                 ) {
                     Icon(
@@ -2975,7 +3008,10 @@ fun NirvanaThreadDetailsScreen(
 
                     OutlinedTextField(
                         value = messageBody,
-                        onValueChange = { messageBody = it },
+                        onValueChange = { 
+                            messageBody = it 
+                            viewModel.saveDraft(thread.threadId, it)
+                        },
                         placeholder = {
                             Text(
                                 text = NirvanaLocal.get("type_msg", language),
@@ -3000,6 +3036,7 @@ fun NirvanaThreadDetailsScreen(
                         onClick = {
                             viewModel.sendSmsMessage(thread.address, messageBody, thread.threadId, selectedSim?.id)
                             messageBody = ""
+                            viewModel.saveDraft(thread.threadId, "")
                             showStickersPanel = false
                         },
                         modifier = Modifier
@@ -3225,15 +3262,30 @@ fun NirvanaMessageBubble(
                         fontSizeScale = fontSizeScale,
                         onClickNumber = { rawNumber ->
                             clipboardManager.setText(AnnotatedString(rawNumber))
-                            val cleanNumber = rawNumber
-                                .replace('۰', '0').replace('۱', '1').replace('۲', '2').replace('۳', '3').replace('۴', '4')
-                                .replace('۵', '5').replace('۶', '6').replace('۷', '7').replace('۸', '8').replace('۹', '9')
-                                .replace("[^0-9+]".toRegex(), "")
-                            if (cleanNumber.length >= 3) {
-                                try {
-                                    val dialIntent = Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$cleanNumber"))
-                                    context.startActivity(dialIntent)
-                                } catch (e: Exception) {
+                            val isMissedCallMessage = message.body.contains("تماس بی پاسخ") || 
+                                message.body.contains("تماس بی‌پاسخ") || 
+                                message.body.contains("تماس از") || 
+                                message.body.contains("missed call", ignoreCase = true) || 
+                                message.body.contains("تماسبان") || 
+                                message.body.contains("تماس‌بان")
+
+                            if (isMissedCallMessage) {
+                                val cleanNumber = rawNumber
+                                    .replace('۰', '0').replace('۱', '1').replace('۲', '2').replace('۳', '3').replace('۴', '4')
+                                    .replace('۵', '5').replace('۶', '6').replace('۷', '7').replace('۸', '8').replace('۹', '9')
+                                    .replace("[^0-9+]".toRegex(), "")
+                                if (cleanNumber.length >= 3) {
+                                    try {
+                                        val dialIntent = Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$cleanNumber"))
+                                        context.startActivity(dialIntent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(
+                                            context,
+                                            if (language == "fa") "کپی شد: $rawNumber" else "Copied: $rawNumber",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                } else {
                                     Toast.makeText(
                                         context,
                                         if (language == "fa") "کپی شد: $rawNumber" else "Copied: $rawNumber",

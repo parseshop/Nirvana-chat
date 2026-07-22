@@ -106,4 +106,30 @@ class NirvanaSettings(context: Context) {
             val raw = value.filter { it.isNotEmpty() }.joinToString(",")
             prefs.edit().putString("hidden_phone_numbers", raw).apply()
         }
+
+    fun getDraft(threadId: Long): String {
+        return prefs.getString("draft_thread_$threadId", "") ?: ""
+    }
+
+    fun saveDraft(threadId: Long, text: String) {
+        if (text.isBlank()) {
+            prefs.edit().remove("draft_thread_$threadId").apply()
+        } else {
+            prefs.edit().putString("draft_thread_$threadId", text).apply()
+        }
+    }
+
+    fun getAllDrafts(): Map<Long, String> {
+        val result = mutableMapOf<Long, String>()
+        prefs.all.forEach { (key, value) ->
+            if (key.startsWith("draft_thread_")) {
+                val threadId = key.removePrefix("draft_thread_").toLongOrNull()
+                val text = value as? String
+                if (threadId != null && !text.isNullOrBlank()) {
+                    result[threadId] = text
+                }
+            }
+        }
+        return result
+    }
 }

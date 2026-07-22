@@ -78,6 +78,18 @@ class NirvanaViewModel(application: Application) : AndroidViewModel(application)
     private val _isDefaultBannerDismissed = MutableStateFlow(settings.isDefaultBannerDismissed)
     val isDefaultBannerDismissed: StateFlow<Boolean> = _isDefaultBannerDismissed.asStateFlow()
 
+    private val _draftsMap = MutableStateFlow<Map<Long, String>>(settings.getAllDrafts())
+    val draftsMap: StateFlow<Map<Long, String>> = _draftsMap.asStateFlow()
+
+    fun getDraft(threadId: Long): String {
+        return _draftsMap.value[threadId] ?: settings.getDraft(threadId)
+    }
+
+    fun saveDraft(threadId: Long, text: String) {
+        settings.saveDraft(threadId, text)
+        _draftsMap.value = settings.getAllDrafts()
+    }
+
     private val _showWelcomeDialog = MutableStateFlow(false)
     val showWelcomeDialog: StateFlow<Boolean> = _showWelcomeDialog.asStateFlow()
 
