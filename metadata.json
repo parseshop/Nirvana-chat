@@ -1,0 +1,6 @@
+{
+  "name": "Nirvana",
+  "description": "Sleek, customizable SMS Messenger with automated advertising spam filtering and detailed settings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
