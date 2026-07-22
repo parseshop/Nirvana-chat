@@ -107,15 +107,39 @@ class NirvanaSettings(context: Context) {
             prefs.edit().putString("hidden_phone_numbers", raw).apply()
         }
 
+    var showMessagePreviewInList: Boolean
+        get() = prefs.getBoolean("show_message_preview_in_list", true)
+        set(value) = prefs.edit().putBoolean("show_message_preview_in_list", value).apply()
+
+    var showContactNames: Boolean
+        get() = prefs.getBoolean("show_contact_names", true)
+        set(value) = prefs.edit().putBoolean("show_contact_names", value).apply()
+
+    var isSwipeToReplyEnabled: Boolean
+        get() = prefs.getBoolean("swipe_to_reply_enabled", true)
+        set(value) = prefs.edit().putBoolean("swipe_to_reply_enabled", value).apply()
+
+    var bubbleColorScheme: String
+        get() = prefs.getString("bubble_color_scheme", "default") ?: "default"
+        set(value) = prefs.edit().putString("bubble_color_scheme", value).apply()
+
     fun getDraft(threadId: Long): String {
         return prefs.getString("draft_thread_$threadId", "") ?: ""
     }
 
+    fun getDraftTimestamp(threadId: Long): Long {
+        return prefs.getLong("draft_time_$threadId", 0L)
+    }
+
     fun saveDraft(threadId: Long, text: String) {
         if (text.isBlank()) {
-            prefs.edit().remove("draft_thread_$threadId").apply()
+            prefs.edit().remove("draft_thread_$threadId").remove("draft_time_$threadId").apply()
         } else {
-            prefs.edit().putString("draft_thread_$threadId", text).apply()
+            val now = System.currentTimeMillis()
+            prefs.edit()
+                .putString("draft_thread_$threadId", text)
+                .putLong("draft_time_$threadId", now)
+                .apply()
         }
     }
 
@@ -127,6 +151,20 @@ class NirvanaSettings(context: Context) {
                 val text = value as? String
                 if (threadId != null && !text.isNullOrBlank()) {
                     result[threadId] = text
+                }
+            }
+        }
+        return result
+    }
+
+    fun getAllDraftTimestamps(): Map<Long, Long> {
+        val result = mutableMapOf<Long, Long>()
+        prefs.all.forEach { (key, value) ->
+            if (key.startsWith("draft_time_")) {
+                val threadId = key.removePrefix("draft_time_").toLongOrNull()
+                val timestamp = value as? Long
+                if (threadId != null && timestamp != null && timestamp > 0L) {
+                    result[threadId] = timestamp
                 }
             }
         }

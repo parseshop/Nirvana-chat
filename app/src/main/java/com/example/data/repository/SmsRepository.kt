@@ -126,25 +126,7 @@ class SmsRepository(private val context: Context) {
                 body.contains("تماس از") || body.contains("missed call", ignoreCase = true) || 
                 body.contains("تماسبان") || body.contains("تماس‌بان")
         if (isMissedCall) {
-            val regex = "(\\+?989\\d{9}|09\\d{9}|9\\d{9})".toRegex()
-            val match = regex.find(body)
-            if (match != null) {
-                val foundNum = match.value
-                val cleanFound = foundNum.replace("[^0-9]".toRegex(), "")
-                val cleanNum = if (cleanFound.startsWith("98")) {
-                    "0" + cleanFound.substring(2)
-                } else if (cleanFound.startsWith("0")) {
-                    cleanFound
-                } else if (cleanFound.startsWith("9") && cleanFound.length == 10) {
-                    "0" + cleanFound
-                } else {
-                    cleanFound
-                }
-                val contactName = contactMap[cleanNum] ?: contactMap[cleanNum.takeLast(10)]
-                if (contactName != null) {
-                    return "تماس بی‌پاسخ: $contactName"
-                }
-            }
+            return "تماس بی‌پاسخ"
         }
         return defaultName
     }
@@ -154,9 +136,11 @@ class SmsRepository(private val context: Context) {
                 body.contains("تماس از") || body.contains("missed call", ignoreCase = true) || 
                 body.contains("تماسبان") || body.contains("تماس‌بان")
         if (isMissedCall) {
+            val normalizedBody = body.replace('۰', '0').replace('۱', '1').replace('۲', '2').replace('۳', '3').replace('۴', '4')
+                .replace('۵', '5').replace('۶', '6').replace('۷', '7').replace('۸', '8').replace('۹', '9')
             val regex = "(\\+?989\\d{9}|09\\d{9}|9\\d{9})".toRegex()
             var processedBody = body
-            regex.findAll(body).forEach { match ->
+            regex.findAll(normalizedBody).forEach { match ->
                 val foundNum = match.value
                 val cleanFound = foundNum.replace("[^0-9]".toRegex(), "")
                 val cleanNum = if (cleanFound.startsWith("98")) {
@@ -170,7 +154,10 @@ class SmsRepository(private val context: Context) {
                 }
                 val contactName = contactMap[cleanNum] ?: contactMap[cleanNum.takeLast(10)]
                 if (contactName != null) {
-                    processedBody = processedBody.replace(foundNum, "$contactName ($cleanNum)")
+                    // Try replacing either normalized foundNum or match in processedBody
+                    if (processedBody.contains(foundNum)) {
+                        processedBody = processedBody.replace(foundNum, "$contactName ($cleanNum)")
+                    }
                 }
             }
             return processedBody

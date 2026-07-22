@@ -73,6 +73,7 @@ object NirvanaLocal {
         "delivery_report_desc" to "دریافت گزارش تحویل پیام‌های ارسالی و نمایش دو تیک در کنار پیامک‌های تحویل‌شده",
         "seconds_unit" to "ثانیه",
         "cancel_send" to "لغو ارسال",
+        "send_now" to "ارسال فوری",
         "sending_in" to "ارسال در %d ثانیه دیگر..."
     )
 
@@ -148,6 +149,7 @@ object NirvanaLocal {
         "delivery_report_desc" to "Request delivery reports and show double checkmarks for delivered messages",
         "seconds_unit" to "seconds",
         "cancel_send" to "Cancel Send",
+        "send_now" to "Send Now",
         "sending_in" to "Sending in %d seconds..."
     )
 

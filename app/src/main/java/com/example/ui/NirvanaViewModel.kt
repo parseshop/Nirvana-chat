@@ -78,6 +78,38 @@ class NirvanaViewModel(application: Application) : AndroidViewModel(application)
     private val _isDefaultBannerDismissed = MutableStateFlow(settings.isDefaultBannerDismissed)
     val isDefaultBannerDismissed: StateFlow<Boolean> = _isDefaultBannerDismissed.asStateFlow()
 
+    private val _showMessagePreviewInList = MutableStateFlow(settings.showMessagePreviewInList)
+    val showMessagePreviewInList: StateFlow<Boolean> = _showMessagePreviewInList.asStateFlow()
+
+    fun setShowMessagePreviewInList(enabled: Boolean) {
+        settings.showMessagePreviewInList = enabled
+        _showMessagePreviewInList.value = enabled
+    }
+
+    private val _showContactNames = MutableStateFlow(settings.showContactNames)
+    val showContactNames: StateFlow<Boolean> = _showContactNames.asStateFlow()
+
+    fun setShowContactNames(enabled: Boolean) {
+        settings.showContactNames = enabled
+        _showContactNames.value = enabled
+    }
+
+    private val _isSwipeToReplyEnabled = MutableStateFlow(settings.isSwipeToReplyEnabled)
+    val isSwipeToReplyEnabled: StateFlow<Boolean> = _isSwipeToReplyEnabled.asStateFlow()
+
+    fun setSwipeToReplyEnabled(enabled: Boolean) {
+        settings.isSwipeToReplyEnabled = enabled
+        _isSwipeToReplyEnabled.value = enabled
+    }
+
+    private val _bubbleColorScheme = MutableStateFlow(settings.bubbleColorScheme)
+    val bubbleColorScheme: StateFlow<String> = _bubbleColorScheme.asStateFlow()
+
+    fun setBubbleColorScheme(scheme: String) {
+        settings.bubbleColorScheme = scheme
+        _bubbleColorScheme.value = scheme
+    }
+
     private val _draftsMap = MutableStateFlow<Map<Long, String>>(settings.getAllDrafts())
     val draftsMap: StateFlow<Map<Long, String>> = _draftsMap.asStateFlow()
 
@@ -88,6 +120,10 @@ class NirvanaViewModel(application: Application) : AndroidViewModel(application)
     fun saveDraft(threadId: Long, text: String) {
         settings.saveDraft(threadId, text)
         _draftsMap.value = settings.getAllDrafts()
+        val draftTimes = settings.getAllDraftTimestamps()
+        _threads.value = _threads.value.sortedByDescending { thread ->
+            maxOf(thread.date, draftTimes[thread.threadId] ?: 0L)
+        }
     }
 
     private val _showWelcomeDialog = MutableStateFlow(false)
@@ -494,8 +530,16 @@ class NirvanaViewModel(application: Application) : AndroidViewModel(application)
                     hiddenPhonesNormalized.contains(normalizePhoneNumber(it.address))
                 }
                 
-                _threads.value = visibleRegular
-                _spamThreads.value = visibleSpam
+                val draftTimes = settings.getAllDraftTimestamps()
+                val sortedRegular = visibleRegular.sortedByDescending { thread ->
+                    maxOf(thread.date, draftTimes[thread.threadId] ?: 0L)
+                }
+                val sortedSpam = visibleSpam.sortedByDescending { thread ->
+                    maxOf(thread.date, draftTimes[thread.threadId] ?: 0L)
+                }
+
+                _threads.value = sortedRegular
+                _spamThreads.value = sortedSpam
                 _hiddenThreads.value = hiddenRegular + hiddenSpam
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -564,6 +608,12 @@ class NirvanaViewModel(application: Application) : AndroidViewModel(application)
                 loadAllSmsData()
             }
         }
+    }
+
+    fun sendNowDelayed() {
+        val pending = _pendingDelayedMessage.value ?: return
+        cancelDelayedSend()
+        performActualSend(pending.address, pending.body, pending.threadId, pending.subId)
     }
 
     fun cancelDelayedSend() {

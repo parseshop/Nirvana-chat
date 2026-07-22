@@ -13,11 +13,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -32,7 +38,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -1347,6 +1357,8 @@ fun NirvanaThreadsScreen(
         val conversationsUnreadCount = remember(threads) { threads.sumOf { it.unreadCount } }
         val spamUnreadCount = remember(spamThreads) { spamThreads.sumOf { it.unreadCount } }
         val draftsMap by viewModel.draftsMap.collectAsState()
+        val showContactNames by viewModel.showContactNames.collectAsState()
+        val showMessagePreviewInList by viewModel.showMessagePreviewInList.collectAsState()
 
         // Folder Tabs (Normal Chats vs. Anti-Spam folder)
         TabRow(
@@ -1479,6 +1491,8 @@ fun NirvanaThreadsScreen(
                             isSelectionMode = isSelectionMode.value,
                             isSelected = selectedThreadIds.contains(thread.threadId),
                             draftText = draftsMap[thread.threadId],
+                            showContactNames = showContactNames,
+                            showMessagePreviewInList = showMessagePreviewInList,
                             onHide = {
                                 val currentPin = viewModel.securePin.value
                                 if (currentPin.isEmpty()) {
@@ -2006,13 +2020,25 @@ fun NirvanaThreadRowItem(
     isSelected: Boolean = false,
     onHide: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
-    draftText: String? = null
+    draftText: String? = null,
+    showContactNames: Boolean = true,
+    showMessagePreviewInList: Boolean = true
 ) {
     var expandedMenu by remember { mutableStateOf(false) }
 
     val initialLetter = (thread.senderName ?: thread.address).trim().take(1).uppercase()
     val isUnread = thread.unreadCount > 0
     val hasDraft = !draftText.isNullOrBlank()
+
+    val displayName = if (showContactNames) {
+        thread.senderName ?: thread.address
+    } else {
+        if (thread.senderName == "تماس بی‌پاسخ" || thread.senderName?.startsWith("تماس بی‌پاسخ") == true) {
+            "تماس بی‌پاسخ"
+        } else {
+            thread.address
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -2104,7 +2130,7 @@ fun NirvanaThreadRowItem(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = thread.senderName ?: thread.address,
+                        text = displayName,
                         style = NirvanaFont.getTextStyle(
                             fontStyle, 
                             fontSizeScale, 
@@ -2124,39 +2150,40 @@ fun NirvanaThreadRowItem(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                if (showMessagePreviewInList) {
+                    Spacer(modifier = Modifier.height(4.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val displaySnippet = if (hasDraft) {
-                        if (language == "fa") "پیش‌نویس: $draftText" else "Draft: $draftText"
-                    } else {
-                        thread.body
-                    }
-                    val snippetColor = if (hasDraft) {
-                        MaterialTheme.colorScheme.error
-                    } else if (isUnread) {
-                        MaterialTheme.colorScheme.onBackground
-                    } else {
-                        MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
-                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val displaySnippet = if (hasDraft) {
+                            if (language == "fa") "پیش‌نویس: $draftText" else "Draft: $draftText"
+                        } else {
+                            thread.body
+                        }
+                        val snippetColor = if (hasDraft) {
+                            MaterialTheme.colorScheme.error
+                        } else if (isUnread) {
+                            MaterialTheme.colorScheme.onBackground
+                        } else {
+                            MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                        }
 
-                    Text(
-                        text = displaySnippet,
-                        style = NirvanaFont.getTextStyle(
-                            fontStyle, 
-                            fontSizeScale, 
-                            13, 
-                            if (hasDraft || isUnread) FontWeight.SemiBold else FontWeight.Normal
-                        ),
-                        color = snippetColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                        Text(
+                            text = displaySnippet,
+                            style = NirvanaFont.getTextStyle(
+                                fontStyle, 
+                                fontSizeScale, 
+                                13, 
+                                if (hasDraft || isUnread) FontWeight.SemiBold else FontWeight.Normal
+                            ),
+                            color = snippetColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
 
                     if (isUnread) {
                         Box(
@@ -2176,6 +2203,7 @@ fun NirvanaThreadRowItem(
                 }
             }
         }
+    }
 
         // Long Press Context Menu
         DropdownMenu(
@@ -2328,6 +2356,9 @@ fun NirvanaThreadDetailsScreen(
 
     var showActionMenu by remember { mutableStateOf(false) }
     var forwardingMessageText by remember { mutableStateOf<String?>(null) }
+    var replyingToMessage by remember { mutableStateOf<SmsMessage?>(null) }
+    val isSwipeToReplyEnabled by viewModel.isSwipeToReplyEnabled.collectAsState()
+    val bubbleColorScheme by viewModel.bubbleColorScheme.collectAsState()
 
     // Multi-SIM selection
     val activeSims by viewModel.activeSims.collectAsState()
@@ -2860,7 +2891,12 @@ fun NirvanaThreadDetailsScreen(
                                     if (language == "fa") "پیام ذخیره شد" else "Message saved",
                                     Toast.LENGTH_SHORT
                                 ).show()
-                            }
+                            },
+                            onReplyMessage = {
+                                replyingToMessage = item.message
+                            },
+                            isSwipeToReplyEnabled = isSwipeToReplyEnabled,
+                            bubbleColorScheme = bubbleColorScheme
                         )
                     }
                 }
@@ -2874,6 +2910,61 @@ fun NirvanaThreadDetailsScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column {
+                // Reply Preview Banner
+                replyingToMessage?.let { replyMsg ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Reply,
+                                    contentDescription = "Reply",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = if (language == "fa") "پاسخ به:" else "Replying to:",
+                                        style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11, FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = replyMsg.body,
+                                        style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 12),
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = { replyingToMessage = null },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "Cancel reply",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Delayed sending countdown banner
                 pendingMsg?.let { pm ->
                     Row(
@@ -2887,24 +2978,46 @@ fun NirvanaThreadDetailsScreen(
                         Text(
                             text = String.format(NirvanaLocal.get("sending_in", language), pm.secondsRemaining),
                             style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 13, FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onErrorContainer
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
                         )
-                        Button(
-                            onClick = {
-                                messageBody = pm.body
-                                viewModel.cancelDelayedSend()
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error,
-                                contentColor = Color.White
-                            ),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = NirvanaLocal.get("cancel_send", language),
-                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11, FontWeight.Bold)
-                            )
+                            Button(
+                                onClick = {
+                                    viewModel.sendNowDelayed()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = Color.White
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text(
+                                    text = NirvanaLocal.get("send_now", language),
+                                    style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11, FontWeight.Bold)
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    messageBody = pm.body
+                                    viewModel.cancelDelayedSend()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = Color.White
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text(
+                                    text = NirvanaLocal.get("cancel_send", language),
+                                    style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11, FontWeight.Bold)
+                                )
+                            }
                         }
                     }
                 }
@@ -3006,37 +3119,77 @@ fun NirvanaThreadDetailsScreen(
 
                     Spacer(modifier = Modifier.width(4.dp))
 
-                    OutlinedTextField(
-                        value = messageBody,
-                        onValueChange = { 
-                            messageBody = it 
-                            viewModel.saveDraft(thread.threadId, it)
-                        },
-                        placeholder = {
-                            Text(
-                                text = NirvanaLocal.get("type_msg", language),
-                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 14)
+                    Column(modifier = Modifier.weight(1f)) {
+                        OutlinedTextField(
+                            value = messageBody,
+                            onValueChange = { 
+                                messageBody = it 
+                                viewModel.saveDraft(thread.threadId, it)
+                            },
+                            placeholder = {
+                                Text(
+                                    text = NirvanaLocal.get("type_msg", language),
+                                    style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 14)
+                                )
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("chat_input_field"),
+                            shape = RoundedCornerShape(20.dp),
+                            maxLines = 4,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                             )
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("chat_input_field"),
-                        shape = RoundedCornerShape(20.dp),
-                        maxLines = 4,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                         )
-                    )
+
+                        val (smsSegments, smsRemaining) = remember(messageBody) {
+                            if (messageBody.isEmpty()) {
+                                Pair(1, 70)
+                            } else {
+                                val isGsm = messageBody.all { it.code <= 127 }
+                                val singleLimit = if (isGsm) 160 else 70
+                                val multiLimit = if (isGsm) 153 else 67
+                                val len = messageBody.length
+                                if (len <= singleLimit) {
+                                    Pair(1, singleLimit - len)
+                                } else {
+                                    val seg = ((len - 1) / multiLimit) + 1
+                                    val rem = (seg * multiLimit) - len
+                                    Pair(seg, rem)
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Text(
+                                text = "$smsSegments/$smsRemaining",
+                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 10, FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.width(8.dp))
 
                     // Beautiful Circular Send Button
                     FilledIconButton(
                         onClick = {
-                            viewModel.sendSmsMessage(thread.address, messageBody, thread.threadId, selectedSim?.id)
+                            val finalBody = if (replyingToMessage != null) {
+                                val cleanSnippet = replyingToMessage!!.body.take(50).replace("\n", " ")
+                                "↩️ [پاسخ به: $cleanSnippet...]\n$messageBody"
+                            } else {
+                                messageBody
+                            }
+                            viewModel.sendSmsMessage(thread.address, finalBody, thread.threadId, selectedSim?.id)
                             messageBody = ""
                             viewModel.saveDraft(thread.threadId, "")
+                            replyingToMessage = null
                             showStickersPanel = false
                         },
                         modifier = Modifier
@@ -3208,7 +3361,10 @@ fun NirvanaMessageBubble(
     fontSizeScale: Float,
     onDeleteMessage: () -> Unit,
     onForwardMessage: () -> Unit,
-    onSaveMessage: () -> Unit
+    onSaveMessage: () -> Unit,
+    onReplyMessage: (() -> Unit)? = null,
+    isSwipeToReplyEnabled: Boolean = true,
+    bubbleColorScheme: String = "default"
 ) {
     val isSent = message.type == 2 // 1 = Received, 2 = Sent
     val alignment = if (isSent) {
@@ -3216,12 +3372,29 @@ fun NirvanaMessageBubble(
     } else {
         if (language == "fa") Alignment.CenterEnd else Alignment.CenterStart
     }
-    val bubbleColor = if (isSent) MaterialTheme.colorScheme.primary 
-                       else MaterialTheme.colorScheme.secondaryContainer
-    val textColor = if (isSent) Color.White else MaterialTheme.colorScheme.onSecondaryContainer
+
+    val (bubbleColor, textColor) = when (bubbleColorScheme) {
+        "classic_blue" -> if (isSent) Pair(Color(0xFF1976D2), Color.White) else Pair(Color(0xFFECEFF1), Color(0xFF263238))
+        "emerald_mint" -> if (isSent) Pair(Color(0xFF00897B), Color.White) else Pair(Color(0xFFE0F2F1), Color(0xFF004D40))
+        "purple_lavender" -> if (isSent) Pair(Color(0xFF7B1FA2), Color.White) else Pair(Color(0xFFF3E5F5), Color(0xFF4A148C))
+        "sunset_warm" -> if (isSent) Pair(Color(0xFFE65100), Color.White) else Pair(Color(0xFFFFF3E0), Color(0xFF3E2723))
+        "modern_dark" -> if (isSent) Pair(Color(0xFF3F51B5), Color.White) else Pair(Color(0xFF37474F), Color.White)
+        "rose_pink" -> if (isSent) Pair(Color(0xFFD81B60), Color.White) else Pair(Color(0xFFFCE4EC), Color(0xFF880E4F))
+        else -> {
+            if (isSent) Pair(MaterialTheme.colorScheme.primary, Color.White)
+            else Pair(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+        }
+    }
 
     var showDetailedTime by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    val animatedOffsetX by animateFloatAsState(
+        targetValue = offsetX,
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "swipe_reply_anim"
+    )
 
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -3229,47 +3402,170 @@ fun NirvanaMessageBubble(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 2.dp)
+            .then(
+                if (isSwipeToReplyEnabled) {
+                    Modifier.pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (offsetX < -100f && onReplyMessage != null) {
+                                    onReplyMessage()
+                                }
+                                offsetX = 0f
+                            },
+                            onDragCancel = { offsetX = 0f },
+                            onHorizontalDrag = { _, dragAmount ->
+                                if (dragAmount < 0 || offsetX < 0) {
+                                    offsetX = (offsetX + dragAmount).coerceIn(-160f, 0f)
+                                }
+                            }
+                        )
+                    }
+                } else Modifier
+            ),
         contentAlignment = alignment
     ) {
-        Column(
-            horizontalAlignment = if (isSent) {
-                if (language == "fa") Alignment.Start else Alignment.End
-            } else {
-                if (language == "fa") Alignment.End else Alignment.Start
-            },
-            modifier = Modifier.fillMaxWidth(0.85f)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.graphicsLayer { translationX = animatedOffsetX }
         ) {
+            Column(
+                horizontalAlignment = if (isSent) {
+                    if (language == "fa") Alignment.Start else Alignment.End
+                } else {
+                    if (language == "fa") Alignment.End else Alignment.Start
+                },
+                modifier = Modifier.fillMaxWidth(0.85f)
+            ) {
             Box {
+                val isMissedCallMsg = message.body.contains("تماس بی پاسخ") || 
+                    message.body.contains("تماس بی‌پاسخ") || 
+                    message.body.contains("تماس از") || 
+                    message.body.contains("missed call", ignoreCase = true) || 
+                    message.body.contains("تماسبان") || 
+                    message.body.contains("تماس‌بان")
+
+                val missedCallNumber = remember(message.body, message.address) {
+                    val foundNumber = "(\\+?[0-9۰-۹]{3,13})".toRegex().find(message.body)?.value
+                    val num = foundNumber ?: message.address
+                    num.replace('۰', '0').replace('۱', '1').replace('۲', '2').replace('۳', '3').replace('۴', '4')
+                       .replace('۵', '5').replace('۶', '6').replace('۷', '7').replace('۸', '8').replace('۹', '9')
+                       .replace("[^0-9+]".toRegex(), "")
+                }
+
                 Surface(
                     color = bubbleColor,
                     shape = RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isSent) 16.dp else 4.dp,
-                        bottomEnd = if (isSent) 4.dp else 16.dp
+                        topStart = 20.dp,
+                        topEnd = 20.dp,
+                        bottomStart = if (isSent) 20.dp else 4.dp,
+                        bottomEnd = if (isSent) 4.dp else 20.dp
                     ),
-                    tonalElevation = 2.dp,
+                    shadowElevation = 1.dp,
+                    tonalElevation = 3.dp,
+                    border = if (!isSent) BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)) else null,
                     modifier = Modifier.combinedClickable(
                         onClick = { showDetailedTime = !showDetailedTime },
                         onLongClick = { showMenu = true }
                     )
                 ) {
-                    CopyableNumbersText(
-                        text = message.body,
-                        textColor = textColor,
-                        fontStyle = fontStyle,
-                        fontSizeScale = fontSizeScale,
-                        onClickNumber = { rawNumber ->
-                            clipboardManager.setText(AnnotatedString(rawNumber))
-                            val isMissedCallMessage = message.body.contains("تماس بی پاسخ") || 
-                                message.body.contains("تماس بی‌پاسخ") || 
-                                message.body.contains("تماس از") || 
-                                message.body.contains("missed call", ignoreCase = true) || 
-                                message.body.contains("تماسبان") || 
-                                message.body.contains("تماس‌بان")
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        val isRepliedMsg = message.body.startsWith("↩️ [") || message.body.contains("↩️ [")
+                        val lineBreakIndex = message.body.indexOf('\n')
+                        val rawQuoteLine = if (isRepliedMsg && lineBreakIndex != -1) message.body.substring(0, lineBreakIndex).trim() else if (isRepliedMsg) message.body else ""
+                        val mainResponsePart = if (isRepliedMsg && lineBreakIndex != -1) message.body.substring(lineBreakIndex + 1).trim() else message.body
 
-                            if (isMissedCallMessage) {
+                        val cleanQuoteText = remember(rawQuoteLine) {
+                            var txt = rawQuoteLine
+                            if (txt.contains("↩️ [")) {
+                                val start = txt.indexOf("↩️ [") + 4
+                                val end = txt.indexOf("]", start)
+                                txt = if (end != -1 && end > start) txt.substring(start, end) else txt.substring(start)
+                            }
+                            if (txt.startsWith("پاسخ به: ")) txt = txt.removePrefix("پاسخ به: ")
+                            if (txt.startsWith("Replying to: ")) txt = txt.removePrefix("Replying to: ")
+                            txt.trim()
+                        }
+
+                        if (isRepliedMsg && cleanQuoteText.isNotBlank()) {
+                            // Quoted Message Box
+                            Surface(
+                                color = if (isSent) Color.White.copy(alpha = 0.22f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(4.dp)
+                                            .height(32.dp)
+                                            .background(
+                                                color = if (isSent) Color.White else MaterialTheme.colorScheme.primary,
+                                                shape = RoundedCornerShape(2.dp)
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Reply,
+                                                contentDescription = null,
+                                                tint = if (isSent) Color.White else MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = if (language == "fa") "پاسخ به پیام" else "Replying to message",
+                                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11, FontWeight.Bold),
+                                                color = if (isSent) Color.White else MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = cleanQuoteText,
+                                            style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 12),
+                                            color = textColor.copy(alpha = 0.9f),
+                                            maxLines = 2,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Dashed Line Separator
+                            val dashColor = if (isSent) Color.White.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.35f)
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .height(1.dp)
+                            ) {
+                                val stroke = Stroke(
+                                    width = 2f,
+                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
+                                )
+                                drawLine(
+                                    color = dashColor,
+                                    start = Offset(0f, 0f),
+                                    end = Offset(size.width, 0f),
+                                    strokeWidth = stroke.width,
+                                    pathEffect = stroke.pathEffect
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+
+                        CopyableNumbersText(
+                            text = if (isRepliedMsg && mainResponsePart.isNotBlank()) mainResponsePart else message.body,
+                            textColor = textColor,
+                            fontStyle = fontStyle,
+                            fontSizeScale = fontSizeScale,
+                            onClickNumber = { rawNumber ->
                                 val cleanNumber = rawNumber
                                     .replace('۰', '0').replace('۱', '1').replace('۲', '2').replace('۳', '3').replace('۴', '4')
                                     .replace('۵', '5').replace('۶', '6').replace('۷', '7').replace('۸', '8').replace('۹', '9')
@@ -3279,40 +3575,94 @@ fun NirvanaMessageBubble(
                                         val dialIntent = Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$cleanNumber"))
                                         context.startActivity(dialIntent)
                                     } catch (e: Exception) {
-                                        Toast.makeText(
-                                            context,
-                                            if (language == "fa") "کپی شد: $rawNumber" else "Copied: $rawNumber",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                                        clipboardManager.setText(AnnotatedString(rawNumber))
+                                        Toast.makeText(context, if (language == "fa") "کپی شد: $rawNumber" else "Copied: $rawNumber", Toast.LENGTH_SHORT).show()
                                     }
                                 } else {
+                                    clipboardManager.setText(AnnotatedString(rawNumber))
                                     Toast.makeText(
                                         context,
                                         if (language == "fa") "کپی شد: $rawNumber" else "Copied: $rawNumber",
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }
-                            } else {
-                                Toast.makeText(
-                                    context,
-                                    if (language == "fa") "کپی شد: $rawNumber" else "Copied: $rawNumber",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                            },
+                            onFallbackClick = {
+                                if (isMissedCallMsg && missedCallNumber.length >= 3) {
+                                    try {
+                                        val dialIntent = Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$missedCallNumber"))
+                                        context.startActivity(dialIntent)
+                                    } catch (e: Exception) {
+                                        showDetailedTime = !showDetailedTime
+                                    }
+                                } else {
+                                    showDetailedTime = !showDetailedTime
+                                }
+                            },
+                            onLongClick = {
+                                showMenu = true
                             }
-                        },
-                        onFallbackClick = {
-                            showDetailedTime = !showDetailedTime
-                        },
-                        onLongClick = {
-                            showMenu = true
+                        )
+
+                        if (isMissedCallMsg && missedCallNumber.length >= 3) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSent) Color.White.copy(alpha = 0.25f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                                    .clickable {
+                                        try {
+                                            val dialIntent = Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$missedCallNumber"))
+                                            context.startActivity(dialIntent)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, if (language == "fa") "خطا در برقراری تماس" else "Call failed", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Phone,
+                                    contentDescription = "Dial",
+                                    tint = if (isSent) Color.White else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (language == "fa") "تماس با $missedCallNumber" else "Call $missedCallNumber",
+                                    style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 12, FontWeight.Bold),
+                                    color = if (isSent) Color.White else MaterialTheme.colorScheme.primary,
+                                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                                )
+                            }
                         }
-                    )
+                    }
                 }
 
                 DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false }
                 ) {
+                    if (onReplyMessage != null && isSwipeToReplyEnabled) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = if (language == "fa") "پاسخ به این پیام" else "Reply to Message",
+                                    style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 13)
+                                )
+                            },
+                            onClick = {
+                                showMenu = false
+                                onReplyMessage()
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Filled.Reply,
+                                    contentDescription = "Reply"
+                                )
+                            }
+                        )
+                    }
                     DropdownMenuItem(
                         text = {
                             Text(
@@ -3423,7 +3773,17 @@ fun NirvanaMessageBubble(
                 }
             }
         }
+        if (animatedOffsetX < -20f && onReplyMessage != null) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Filled.Reply,
+                contentDescription = "Reply",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
+}
 }
 
 @Composable
@@ -3678,7 +4038,7 @@ fun NirvanaSettingsScreen(
                         item {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(16.dp)
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
                                     Text(
@@ -3719,11 +4079,80 @@ fun NirvanaSettingsScreen(
                             }
                         }
 
+                        // Message Bubble Color Scheme Selection Card
+                        item {
+                            val currentBubbleScheme by viewModel.bubbleColorScheme.collectAsState()
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Text(
+                                        text = if (language == "fa") "رنگ‌بندی حباب‌های پیام" else "Message Bubble Colors",
+                                        style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 15, FontWeight.Bold)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = if (language == "fa") "ترکیب رنگ دلخواه برای پیام‌های ارسالی و دریافتی را انتخاب کنید" else "Choose your preferred color palette for sent & received bubbles",
+                                        style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    val schemes = listOf(
+                                        Triple("default", if (language == "fa") "پیش‌فرض پوسته" else "Default Theme", Pair(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondaryContainer)),
+                                        Triple("classic_blue", if (language == "fa") "آبی و طوسی کلاسیک" else "Classic Blue & Slate", Pair(Color(0xFF1976D2), Color(0xFFECEFF1))),
+                                        Triple("emerald_mint", if (language == "fa") "زمردی و نعنایی" else "Emerald & Mint", Pair(Color(0xFF00897B), Color(0xFFE0F2F1))),
+                                        Triple("purple_lavender", if (language == "fa") "بنفش و یاسی" else "Royal Purple & Lavender", Pair(Color(0xFF7B1FA2), Color(0xFFF3E5F5))),
+                                        Triple("sunset_warm", if (language == "fa") "غروب خورشید (نارنجی و کرم)" else "Sunset Orange & Cream", Pair(Color(0xFFE65100), Color(0xFFFFF3E0))),
+                                        Triple("modern_dark", if (language == "fa") "نیلی و دودی (مدرن)" else "Indigo & Dark Slate", Pair(Color(0xFF3F51B5), Color(0xFF37474F))),
+                                        Triple("rose_pink", if (language == "fa") "رز و صورتی ملایم" else "Rose & Soft Pink", Pair(Color(0xFFD81B60), Color(0xFFFCE4EC)))
+                                    )
+
+                                    schemes.forEach { (key, title, colors) ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { viewModel.setBubbleColorScheme(key) }
+                                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = colors.first,
+                                                    modifier = Modifier.size(20.dp),
+                                                    border = BorderStroke(1.dp, Color.Black.copy(alpha = 0.15f))
+                                                ) {}
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = colors.second,
+                                                    modifier = Modifier.size(20.dp),
+                                                    border = BorderStroke(1.dp, Color.Black.copy(alpha = 0.15f))
+                                                ) {}
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = title,
+                                                    style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 13, FontWeight.Medium)
+                                                )
+                                            }
+                                            RadioButton(
+                                                selected = currentBubbleScheme == key,
+                                                onClick = { viewModel.setBubbleColorScheme(key) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Font selection card
                         item {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(16.dp)
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
                                     Text(
@@ -3956,7 +4385,7 @@ fun NirvanaSettingsScreen(
                         item {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(16.dp)
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
                                     Text(
@@ -3991,12 +4420,114 @@ fun NirvanaSettingsScreen(
                             }
                         }
 
+                        // Show Message Preview Switch Card
+                        item {
+                            val showMessagePreviewInList by viewModel.showMessagePreviewInList.collectAsState()
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = if (language == "fa") "نمایش متن پیام در لیست گفتگوها" else "Show Message Preview in List",
+                                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 15, FontWeight.Bold)
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = if (language == "fa") "پیش‌نمایش متن پیام در زیر نام مخاطب نشان داده شود" else "Display message snippet preview under contact name",
+                                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11),
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                        Switch(
+                                            checked = showMessagePreviewInList,
+                                            onCheckedChange = { viewModel.setShowMessagePreviewInList(it) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Show Contact Name Switch Card
+                        item {
+                            val showContactNames by viewModel.showContactNames.collectAsState()
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = if (language == "fa") "نمایش نام مخاطب" else "Display Contact Names",
+                                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 15, FontWeight.Bold)
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = if (language == "fa") "در صورت غیرفعال بودن، فقط شماره تلفن در گفتگوها نمایش داده می‌شود" else "If disabled, only phone numbers will be shown",
+                                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11),
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                        Switch(
+                                            checked = showContactNames,
+                                            onCheckedChange = { viewModel.setShowContactNames(it) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Reply Option Toggle Switch Card
+                        item {
+                            val isSwipeToReplyEnabled by viewModel.isSwipeToReplyEnabled.collectAsState()
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = if (language == "fa") "قابلیت ریپلای (پاسخ به پیام)" else "Enable Message Reply",
+                                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 15, FontWeight.Bold)
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = if (language == "fa") "امکان ریپلای پیام با کشیدن یا انتخاب از منو" else "Allow replying to messages by swiping or menu option",
+                                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11),
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                        Switch(
+                                            checked = isSwipeToReplyEnabled,
+                                            onCheckedChange = { viewModel.setSwipeToReplyEnabled(it) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         // Configurable Delayed Send Card
                         item {
                             val delayedSeconds by viewModel.delayedSendSeconds.collectAsState()
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(16.dp)
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
                                     Text(
@@ -5075,47 +5606,15 @@ fun NirvanaNewChatDialog(
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     LazyColumn(modifier = Modifier.fillMaxSize().padding(6.dp)) {
-                        // Option to add manually typed number
-                        if (phoneInput.isNotBlank() && phoneInput.all { it.isDigit() || it == '+' }) {
-                            item {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            val customContact = NirvanaContact(phoneInput, phoneInput)
-                                            selectedContacts = selectedContacts + customContact
-                                            phoneInput = ""
-                                        }
-                                        .padding(vertical = 8.dp, horizontal = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Add,
-                                        contentDescription = "Add",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = (if (language == "fa") "افزودن شماره دستی: " else "Add raw number: ") + phoneInput,
-                                        style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 13, FontWeight.Bold)
-                                    )
-                                }
-                            }
-                        }
-
                         if (filteredContacts.isNotEmpty()) {
                             items(filteredContacts) { contact ->
-                                val isSelected = selectedContacts.any { it.phoneNumber == contact.phoneNumber }
+                                val isSelected = phoneInput == contact.phoneNumber || selectedContacts.any { it.phoneNumber == contact.phoneNumber }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            if (isSelected) {
-                                                selectedContacts = selectedContacts.filter { it.phoneNumber != contact.phoneNumber }.toSet()
-                                            } else {
-                                                selectedContacts = selectedContacts + contact
-                                            }
+                                            phoneInput = contact.phoneNumber
+                                            selectedContacts = setOf(contact)
                                         }
                                         .background(
                                             if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
@@ -5160,22 +5659,55 @@ fun NirvanaNewChatDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                OutlinedTextField(
-                    value = initialMessage,
-                    onValueChange = { initialMessage = it },
-                    placeholder = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = initialMessage,
+                        onValueChange = { initialMessage = it },
+                        placeholder = {
+                            Text(
+                                text = NirvanaLocal.get("type_msg", language),
+                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 14)
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .testTag("new_chat_body_field"),
+                        shape = RoundedCornerShape(10.dp),
+                        maxLines = 3
+                    )
+
+                    val (newChatSegments, newChatRemaining) = remember(initialMessage) {
+                        if (initialMessage.isEmpty()) {
+                            Pair(1, 70)
+                        } else {
+                            val isGsm = initialMessage.all { it.code <= 127 }
+                            val singleLimit = if (isGsm) 160 else 70
+                            val multiLimit = if (isGsm) 153 else 67
+                            val len = initialMessage.length
+                            if (len <= singleLimit) {
+                                Pair(1, singleLimit - len)
+                            } else {
+                                val seg = ((len - 1) / multiLimit) + 1
+                                val rem = (seg * multiLimit) - len
+                                Pair(seg, rem)
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
                         Text(
-                            text = NirvanaLocal.get("type_msg", language),
-                            style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 14)
+                            text = "$newChatSegments/$newChatRemaining",
+                            style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 10, FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         )
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .testTag("new_chat_body_field"),
-                    shape = RoundedCornerShape(10.dp),
-                    maxLines = 3
-                )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -5226,13 +5758,13 @@ fun NirvanaNewChatDialog(
                     }
                     Button(
                         onClick = {
-                            val recipients = selectedContacts.map { it.phoneNumber }.joinToString(",")
+                            val recipients = phoneInput.ifBlank { selectedContacts.map { it.phoneNumber }.joinToString(",") }
                             onStartChat(recipients, initialMessage, selectedSim?.id)
                         },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("start_chat_confirm_btn"),
-                        enabled = selectedContacts.isNotEmpty(),
+                        enabled = phoneInput.isNotBlank() || selectedContacts.isNotEmpty(),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
