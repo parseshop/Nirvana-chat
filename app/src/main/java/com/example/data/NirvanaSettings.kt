@@ -123,6 +123,10 @@ class NirvanaSettings(context: Context) {
         get() = prefs.getString("bubble_color_scheme", "default") ?: "default"
         set(value) = prefs.edit().putString("bubble_color_scheme", value).apply()
 
+    var isPinchZoomEnabled: Boolean
+        get() = prefs.getBoolean("pinch_zoom_enabled", true)
+        set(value) = prefs.edit().putBoolean("pinch_zoom_enabled", value).apply()
+
     fun getDraft(threadId: Long): String {
         return prefs.getString("draft_thread_$threadId", "") ?: ""
     }

@@ -23,6 +23,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -57,6 +59,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.gestures.detectTapGestures
 import kotlinx.coroutines.Job
 import androidx.compose.ui.unit.LayoutDirection
@@ -214,6 +217,22 @@ fun NirvanaMainScreen(
 
     LaunchedEffect(activeThread) {
         MainActivity.activeThreadAddress = activeThread?.address
+        activeThread?.let { thread ->
+            try {
+                val notificationManager = currentActivity.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+                if (notificationManager != null) {
+                    notificationManager.cancel(thread.address.hashCode())
+                    val cleanAddr = thread.address.replace("[^0-9]".toRegex(), "")
+                    if (cleanAddr.isNotBlank()) {
+                        notificationManager.cancel(cleanAddr.hashCode())
+                    }
+                    notificationManager.cancel(2026)
+                    notificationManager.cancelAll()
+                }
+            } catch (e: Exception) {
+                // Ignore context/notificationManager exception
+            }
+        }
     }
 
     // Intent Handling (Deep Linking from Notifications, System Contacts & Share Sheet)
@@ -1359,6 +1378,7 @@ fun NirvanaThreadsScreen(
         val draftsMap by viewModel.draftsMap.collectAsState()
         val showContactNames by viewModel.showContactNames.collectAsState()
         val showMessagePreviewInList by viewModel.showMessagePreviewInList.collectAsState()
+        val isPinchZoomEnabled by viewModel.isPinchZoomEnabled.collectAsState()
 
         // Folder Tabs (Normal Chats vs. Anti-Spam folder)
         TabRow(
@@ -1466,7 +1486,27 @@ fun NirvanaThreadsScreen(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(isPinchZoomEnabled, fontSizeScale) {
+                            if (isPinchZoomEnabled) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        if (event.changes.size >= 2) {
+                                            event.changes.forEach { it.consume() }
+                                            val zoom = event.calculateZoom()
+                                            if (zoom != 1f && !zoom.isNaN()) {
+                                                val newScale = (fontSizeScale * zoom).coerceIn(0.7f, 1.8f)
+                                                if (kotlin.math.abs(newScale - fontSizeScale) > 0.012f) {
+                                                    viewModel.setFontSize(newScale)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
                     contentPadding = PaddingValues(bottom = 80.dp)
                 ) {
                     items(filteredThreads, key = { it.threadId }) { thread ->
@@ -2359,6 +2399,7 @@ fun NirvanaThreadDetailsScreen(
     var replyingToMessage by remember { mutableStateOf<SmsMessage?>(null) }
     val isSwipeToReplyEnabled by viewModel.isSwipeToReplyEnabled.collectAsState()
     val bubbleColorScheme by viewModel.bubbleColorScheme.collectAsState()
+    val isPinchZoomEnabled by viewModel.isPinchZoomEnabled.collectAsState()
 
     // Multi-SIM selection
     val activeSims by viewModel.activeSims.collectAsState()
@@ -2832,7 +2873,26 @@ fun NirvanaThreadDetailsScreen(
             state = lazyListState,
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .pointerInput(isPinchZoomEnabled, fontSizeScale) {
+                    if (isPinchZoomEnabled) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.size >= 2) {
+                                    event.changes.forEach { it.consume() }
+                                    val zoom = event.calculateZoom()
+                                    if (zoom != 1f && !zoom.isNaN()) {
+                                        val newScale = (fontSizeScale * zoom).coerceIn(0.7f, 1.8f)
+                                        if (kotlin.math.abs(newScale - fontSizeScale) > 0.012f) {
+                                            viewModel.setFontSize(newScale)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -2942,7 +3002,7 @@ fun NirvanaThreadDetailsScreen(
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                     Text(
-                                        text = replyMsg.body,
+                                        text = getCleanMessageContent(replyMsg.body),
                                         style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 12),
                                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                                         maxLines = 1,
@@ -3181,7 +3241,8 @@ fun NirvanaThreadDetailsScreen(
                     FilledIconButton(
                         onClick = {
                             val finalBody = if (replyingToMessage != null) {
-                                val cleanSnippet = replyingToMessage!!.body.take(50).replace("\n", " ")
+                                val cleanTargetBody = getCleanMessageContent(replyingToMessage!!.body)
+                                val cleanSnippet = cleanTargetBody.replace("\n", " ").take(50)
                                 "↩️ [پاسخ به: $cleanSnippet...]\n$messageBody"
                             } else {
                                 messageBody
@@ -3352,6 +3413,29 @@ fun CopyableNumbersText(
     )
 }
 
+fun getCleanMessageContent(body: String): String {
+    var text = body.trim()
+    while (text.contains("↩️ [")) {
+        val lineBreakIndex = text.indexOf('\n')
+        if (lineBreakIndex != -1) {
+            val candidate = text.substring(lineBreakIndex + 1).trim()
+            if (candidate.isNotBlank()) {
+                text = candidate
+            } else {
+                break
+            }
+        } else {
+            val endIdx = text.indexOf(']')
+            if (endIdx != -1 && endIdx < text.length - 1) {
+                text = text.substring(endIdx + 1).trim()
+            } else {
+                break
+            }
+        }
+    }
+    return text.ifBlank { body }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NirvanaMessageBubble(
@@ -3493,7 +3577,7 @@ fun NirvanaMessageBubble(
                                 color = if (isSent) Color.White.copy(alpha = 0.22f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
-                                    .fillMaxWidth()
+                                    .wrapContentWidth()
                                     .padding(bottom = 6.dp)
                             ) {
                                 Row(
@@ -3510,7 +3594,7 @@ fun NirvanaMessageBubble(
                                             )
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
+                                    Column(modifier = Modifier.weight(1f, fill = false)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(
                                                 imageVector = Icons.Filled.Reply,
@@ -4144,6 +4228,82 @@ fun NirvanaSettingsScreen(
                                             )
                                         }
                                     }
+
+                                    // Live preview of both sent and received bubbles
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Text(
+                                        text = if (language == "fa") "پیش‌نمایش زنده چت:" else "Live Chat Preview:",
+                                        style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 12, FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    val (pSentBg, pSentText, pRecBg, pRecText) = when (currentBubbleScheme) {
+                                        "classic_blue" -> listOf(Color(0xFF1976D2), Color.White, Color(0xFFECEFF1), Color(0xFF263238))
+                                        "emerald_mint" -> listOf(Color(0xFF00897B), Color.White, Color(0xFFE0F2F1), Color(0xFF004D40))
+                                        "purple_lavender" -> listOf(Color(0xFF7B1FA2), Color.White, Color(0xFFF3E5F5), Color(0xFF4A148C))
+                                        "sunset_warm" -> listOf(Color(0xFFE65100), Color.White, Color(0xFFFFF3E0), Color(0xFF3E2723))
+                                        "modern_dark" -> listOf(Color(0xFF3F51B5), Color.White, Color(0xFF37474F), Color.White)
+                                        "rose_pink" -> listOf(Color(0xFFD81B60), Color.White, Color(0xFFFCE4EC), Color(0xFF880E4F))
+                                        else -> listOf(
+                                            MaterialTheme.colorScheme.primary,
+                                            Color.White,
+                                            MaterialTheme.colorScheme.secondaryContainer,
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                                shape = RoundedCornerShape(12.dp)
+                                            )
+                                            .padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        // Received bubble preview
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.Start
+                                        ) {
+                                            Surface(
+                                                color = pRecBg,
+                                                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
+                                                shadowElevation = 1.dp
+                                            ) {
+                                                Text(
+                                                    text = if (language == "fa") "سلام! این نمونه پیام دریافتی است." else "Hello! This is a received message preview.",
+                                                    style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 12),
+                                                    color = pRecText,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                                )
+                                            }
+                                        }
+
+                                        // Sent bubble preview
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            Surface(
+                                                color = pSentBg,
+                                                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp),
+                                                shadowElevation = 1.dp
+                                            ) {
+                                                Text(
+                                                    text = if (language == "fa") "عالیه! پیام ارسالی شما این شکلی میشه ✨" else "Great! Your sent message looks like this ✨",
+                                                    style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 12),
+                                                    color = pSentText,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -4516,6 +4676,40 @@ fun NirvanaSettingsScreen(
                                         Switch(
                                             checked = isSwipeToReplyEnabled,
                                             onCheckedChange = { viewModel.setSwipeToReplyEnabled(it) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Pinch-to-Zoom Font Size Setting Card
+                        item {
+                            val isPinchZoomEnabled by viewModel.isPinchZoomEnabled.collectAsState()
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = if (language == "fa") "تغییر اندازه فونت با دو انگشت (پینچ زوم)" else "Pinch to Zoom Font Size",
+                                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 15, FontWeight.Bold)
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = if (language == "fa") "بزرگ‌نمایی و کوچک‌نمایی متن با حرکت دو انگشت روی لیست پیام‌ها و گفت‌وگوها" else "Zoom font size in/out by pinching on conversation or message lists",
+                                                style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 11),
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                        Switch(
+                                            checked = isPinchZoomEnabled,
+                                            onCheckedChange = { viewModel.setPinchZoomEnabled(it) }
                                         )
                                     }
                                 }
@@ -5587,7 +5781,7 @@ fun NirvanaNewChatDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = if (language == "fa") "انتخاب از مخاطبین" else "Select from contacts",
+                    text = if (language == "fa") "انتخاب مخاطبین (امکان انتخاب چند مخاطب)" else "Select contacts (multi-select)",
                     style = NirvanaFont.getTextStyle(fontStyle, fontSizeScale, 12, FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
@@ -5608,13 +5802,17 @@ fun NirvanaNewChatDialog(
                     LazyColumn(modifier = Modifier.fillMaxSize().padding(6.dp)) {
                         if (filteredContacts.isNotEmpty()) {
                             items(filteredContacts) { contact ->
-                                val isSelected = phoneInput == contact.phoneNumber || selectedContacts.any { it.phoneNumber == contact.phoneNumber }
+                                val isSelected = selectedContacts.any { it.phoneNumber == contact.phoneNumber }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            phoneInput = contact.phoneNumber
-                                            selectedContacts = setOf(contact)
+                                            if (isSelected) {
+                                                selectedContacts = selectedContacts.filter { it.phoneNumber != contact.phoneNumber }.toSet()
+                                            } else {
+                                                selectedContacts = selectedContacts + contact
+                                                phoneInput = ""
+                                            }
                                         }
                                         .background(
                                             if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
@@ -5758,7 +5956,9 @@ fun NirvanaNewChatDialog(
                     }
                     Button(
                         onClick = {
-                            val recipients = phoneInput.ifBlank { selectedContacts.map { it.phoneNumber }.joinToString(",") }
+                            val selectedNums = selectedContacts.map { it.phoneNumber }
+                            val typedNums = phoneInput.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                            val recipients = (selectedNums + typedNums).distinct().joinToString(",")
                             onStartChat(recipients, initialMessage, selectedSim?.id)
                         },
                         modifier = Modifier

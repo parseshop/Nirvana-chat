@@ -110,6 +110,14 @@ class NirvanaViewModel(application: Application) : AndroidViewModel(application)
         _bubbleColorScheme.value = scheme
     }
 
+    private val _isPinchZoomEnabled = MutableStateFlow(settings.isPinchZoomEnabled)
+    val isPinchZoomEnabled: StateFlow<Boolean> = _isPinchZoomEnabled.asStateFlow()
+
+    fun setPinchZoomEnabled(enabled: Boolean) {
+        settings.isPinchZoomEnabled = enabled
+        _isPinchZoomEnabled.value = enabled
+    }
+
     private val _draftsMap = MutableStateFlow<Map<Long, String>>(settings.getAllDrafts())
     val draftsMap: StateFlow<Map<Long, String>> = _draftsMap.asStateFlow()
 
